@@ -16,7 +16,7 @@ jobs:
       - name: Checkout Dian monorepo
         uses: actions/checkout@v4
         with:
-          repository: FinalDevHQ/Dian-plugin-help
+          repository: FinalDevHQ/Dian
           path: dian
 
       # 2. 用本仓库内容覆盖 monorepo 里的 plugin-template 子目录
