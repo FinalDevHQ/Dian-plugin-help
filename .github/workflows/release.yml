@@ -44,27 +44,30 @@ jobs:
         with:
           path: plugin
 
-      # 5. 同步插件代码到 monorepo 的 plugin-template
+      # 5. 同步插件代码到 monorepo 内的独立目录（不能放进 plugin-template，
+      #    因为它是 dian 的 npm workspace，会让 npm ci 用 monorepo 的 lockfile，
+      #    导致 "Missing: <plugin-name>@x.y.z from lock file" 错误。
+      #    目录与 packages/ 平级即可让 file:../packages/plugin-runtime 正确解析）
       - name: Sync plugin files into monorepo
         run: |
-          rm -rf dian/plugin-template
-          mkdir -p dian/plugin-template
-          rsync -a --delete --exclude ".git" plugin/ dian/plugin-template/
+          rm -rf dian/Dian-plugin-help
+          mkdir -p dian/Dian-plugin-help
+          rsync -a --delete --exclude ".git" plugin/ dian/Dian-plugin-help/
 
       # 6. 安装当前插件依赖（使用本仓库自己的 lockfile）
       - name: Install plugin dependencies
-        working-directory: dian/plugin-template
+        working-directory: dian/Dian-plugin-help
         run: npm ci
 
       # 7. 打包插件
       - name: Pack plugin
-        working-directory: dian/plugin-template
+        working-directory: dian/Dian-plugin-help
         run: npm run pack
 
       # 8. 读取 zip 文件名（来自 package.json name 字段）
       - name: Resolve zip filename
         id: meta
-        working-directory: dian/plugin-template
+        working-directory: dian/Dian-plugin-help
         run: |
           NAME=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).name")
           echo "zip=${NAME}.zip" >> "$GITHUB_OUTPUT"
@@ -73,5 +76,5 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dian/plugin-template/${{ steps.meta.outputs.zip }}
+          files: dian/Dian-plugin-help/${{ steps.meta.outputs.zip }}
           generate_release_notes: true
