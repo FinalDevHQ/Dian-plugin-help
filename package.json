@@ -1,7 +1,7 @@
 {
-  "name": "ping-pong",
+  "name": "dian-help",
   "version": "1.0.0",
-  "description": "可自定义指令和回复的 ping-pong 插件",
+  "description": "发送可配置的 help 指令，列出所有已注册的指令",
   "type": "module",
   "scripts": {
     "build": "tsup && vite build --config ui/vite.config.ts",

@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   Plugin,
-  type EventContext,
+  pluginManager,
   type PluginSetupContext,
 } from "@dian/plugin-runtime";
 
@@ -14,11 +14,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = resolve(__dirname, "config.json");
 
 interface Config {
-  command: string;   // 触发指令，默认 !ping
-  reply: string;     // 回复内容，默认 pong! 🏓
+  /** 触发 help 的指令，默认 "help" */
+  command: string;
 }
 
-const DEFAULTS: Config = { command: "!ping", reply: "pong! 🏓" };
+const DEFAULTS: Config = { command: "help" };
 
 function loadConfig(): Config {
   try {
@@ -36,81 +36,75 @@ function saveConfig(cfg: Config): void {
 // ── 插件主体 ──────────────────────────────────────────────────────────────────
 
 @Plugin({
-  name: "ping-pong",
-  description: "可自定义指令和回复内容的 ping-pong 插件",
+  name: "dian-help",
+  description: "发送可配置的 help 指令，列出所有已注册的指令",
   version: "1.0.0",
-  author: "your-name",
-  icon: "🏓",
+  author: "FinalDevHQ",
+  icon: "📖",
 })
-export default class PingPongPlugin {
-  /** 插件加载时间（服务端时间戳，毫秒） */
-  private readonly startTime = Date.now();
-
-  /** 运行时配置（可通过 Web UI 修改 reply，修改 command 需重启） */
+export default class HelpPlugin {
   private config = loadConfig();
 
-  /** 收到指令的累计次数 */
-  private pingCount = 0;
-
-  /** 最近触发记录（最多保留 50 条） */
-  private recentPings: Array<{
-    sender: string;
-    userId?: string;
-    group?: string;
-    time: number;
-  }> = [];
-
   onSetup(ctx: PluginSetupContext): void {
-    // ── 注册指令 ──────────────────────────────────────────────────────────
-    // pattern 用函数形式：每次事件分发时实时读取 this.config.command，
-    // 因此通过 /api/config 修改后立即生效，无需重启服务。
+    // ── 注册 help 指令（函数 pattern，改配置立即生效）────────────────────
     ctx.command({
       name: this.config.command,
       pattern: () => this.config.command,
-      description: `回复 "${this.config.reply}"`,
-      handler: async (c: EventContext) => {
-        this.pingCount++;
-        this.recentPings.unshift({
-          sender: c.event.payload.senderName ?? "unknown",
-          userId: c.event.payload.userId,
-          group: c.event.payload.groupId,
-          time: c.event.timestamp,
-        });
-        if (this.recentPings.length > 50) this.recentPings.pop();
+      description: "列出所有已注册的指令",
+      handler: async (c) => {
+        const lines: string[] = ["📖 指令列表："];
 
-        console.log(
-          `[ping-pong] ${c.event.payload.senderName ?? "?"} ` +
-          `→ "${this.config.reply}"`
-        );
-        await c.reply(this.config.reply);
+        for (const plugin of pluginManager.listPluginsMeta()) {
+          if (!plugin.enabled) continue;
+          if (plugin.commands.length === 0) continue;
+
+          lines.push(`\n[${plugin.icon ?? "🔌"} ${plugin.name}]`);
+          for (const cmd of plugin.commands) {
+            const desc = cmd.description ? `  ${cmd.description}` : "";
+            lines.push(`  ${cmd.pattern}${desc}`);
+          }
+        }
+
+        if (lines.length === 1) {
+          await c.reply("暂无已注册的指令。");
+          return;
+        }
+
+        await c.reply(lines.join("\n"));
       },
     });
 
-    // ── GET /plugins/ping-pong/api/status ────────────────────────────────────
-    ctx.route("GET", "/status", (_req, reply) => {
-      reply.send({
-        startTime: this.startTime,           // 服务端加载时间戳
-        pingCount: this.pingCount,
-        config: this.config,
-        recentPings: this.recentPings.slice(0, 10),
-      });
+    // ── GET /plugins/dian-help/api/config ────────────────────────────────
+    ctx.route("GET", "/config", (_req, reply) => {
+      reply.send({ config: this.config });
     });
 
-    // ── POST /plugins/ping-pong/api/config ───────────────────────────────────
-    // 修改 reply：立即生效；修改 command：需重启服务
+    // ── GET /plugins/dian-help/api/commands ──────────────────────────────
+    // 服务端直接查询 pluginManager，返回所有已启用插件的指令列表
+    // 避免 UI 在 iframe 上下文中跨端口 fetch /plugins 可能失败的问题
+    ctx.route("GET", "/commands", (_req, reply) => {
+      const plugins = pluginManager.listPluginsMeta()
+        .filter((p) => p.enabled && p.commands.length > 0)
+        .map((p) => ({
+          name: p.name,
+          description: p.description,
+          icon: p.icon,
+          commands: p.commands,
+        }));
+      reply.send({ plugins });
+    });
+
+    // ── POST /plugins/dian-help/api/config ───────────────────────────────
     ctx.route("POST", "/config", (req, reply) => {
       const body = req.body as Partial<Config>;
-      if (typeof body.reply === "string" && body.reply.trim()) {
-        this.config.reply = body.reply.trim();
-      }
       if (typeof body.command === "string" && body.command.trim()) {
         this.config.command = body.command.trim();
+        saveConfig(this.config);
       }
-      saveConfig(this.config);
       reply.send({ ok: true, config: this.config });
     });
 
-    // ── Web UI ───────────────────────────────────────────────────────────────
+    // ── Web UI ───────────────────────────────────────────────────────────
     ctx.ui({ staticDir: "./public", entry: "index.html" });
   }
 }
