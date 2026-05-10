@@ -24,7 +24,9 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: dian/package-lock.json
+          cache-dependency-path: |
+            dian/package-lock.json
+            plugin/package-lock.json
 
       # 2. 在 monorepo 根安装全部依赖（含原生模块）
       - name: Install dependencies
@@ -36,23 +38,30 @@ jobs:
         working-directory: dian
         run: npm run build -w packages
 
-      # 4. 用本仓库内容覆盖 monorepo 里的 plugin-template 子目录
-      - name: Checkout plugin-template
+      # 4. 拉取当前插件仓库到独立目录
+      - name: Checkout plugin repository
         uses: actions/checkout@v4
         with:
-          path: dian/plugin-template
+          path: plugin
 
-      # 5. 安装当前插件依赖（使用本仓库自己的 lockfile）
+      # 5. 同步插件代码到 monorepo 的 plugin-template
+      - name: Sync plugin files into monorepo
+        run: |
+          rm -rf dian/plugin-template
+          mkdir -p dian/plugin-template
+          rsync -a --delete --exclude ".git" plugin/ dian/plugin-template/
+
+      # 6. 安装当前插件依赖（使用本仓库自己的 lockfile）
       - name: Install plugin dependencies
         working-directory: dian/plugin-template
         run: npm ci
 
-      # 6. 打包插件
+      # 7. 打包插件
       - name: Pack plugin
         working-directory: dian/plugin-template
         run: npm run pack
 
-      # 7. 读取 zip 文件名（来自 package.json name 字段）
+      # 8. 读取 zip 文件名（来自 package.json name 字段）
       - name: Resolve zip filename
         id: meta
         working-directory: dian/plugin-template
@@ -60,7 +69,7 @@ jobs:
           NAME=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).name")
           echo "zip=${NAME}.zip" >> "$GITHUB_OUTPUT"
 
-      # 8. 创建 GitHub Release 并上传 zip
+      # 9. 创建 GitHub Release 并上传 zip
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
